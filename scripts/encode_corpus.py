@@ -40,10 +40,12 @@ from mdr.retrieval.utils.utils import move_to_cuda, load_saved
 
 def main():
     args = encode_args()
+    ## 加速训练
     if args.fp16:
         import apex
         apex.amp.register_half_function(torch, 'einsum')
-
+    
+    ## 分配GPU？
     if args.local_rank == -1 or args.no_cuda:
         device = torch.device(
             "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
@@ -52,24 +54,30 @@ def main():
         device = torch.device("cuda", args.local_rank)
         n_gpu = 1
         torch.distributed.init_process_group(backend='nccl')
-
+    
+    ## 将被编码的语料库
     if not args.predict_file:
         raise ValueError(
             "If `do_predict` is True, then `predict_file` must be specified.")
 
+    ## 加载模型的自动配置 roberta-base
     bert_config = AutoConfig.from_pretrained(args.model_name)
 
+    ## 定义模型
     if "roberta" in args.model_name:
         model = RobertaCtxEncoder(bert_config, args)
     else:
         model = CtxEncoder(bert_config, args)
+    ## 加载分词器
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 
+    ## 加载数据  id2doc
     eval_dataset = EmDataset(
         tokenizer, args.predict_file, args.max_q_len, args.max_c_len, args.is_query_embed, args.embed_save_path)
     eval_dataloader = DataLoader(
         eval_dataset, batch_size=args.predict_batch_size, collate_fn=em_collate, pin_memory=True, num_workers=args.num_workers)
 
+    ## 加载初始的checkpoint？可能要下载roberta-base
     assert args.init_checkpoint != ""
     model = load_saved(model, args.init_checkpoint, exact=False)
     model.to(device)
